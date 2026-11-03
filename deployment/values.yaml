@@ -1,0 +1,33 @@
+# Base Helm values shared across all environments.
+# Override per environment in values-dev.yaml and values-prod.yaml.
+# See: https://github.com/ecmwf/dss-application-helm-chart
+#
+# LEGACY: read only by the legacy deploy.yml workflow, for applications not
+# yet migrated to Argo CD. Applications deployed by Argo CD keep their values
+# in the dss-applications-argocd-configs repository (<app>/values/, starting
+# from climate-pulse/values/); for them, editing this file deploys nothing.
+
+name: YOUR_APP_NAME
+deployment:
+  image: eccr.ecmwf.int/c3s-applications/YOUR_APP_NAME
+  # Port exposed by the container:
+  #   80   — Nginx (Next.js via reverse proxy, or Vite static)
+  #   3000 — Next.js direct (no Nginx)
+  #   8000 — Python Flask/uWSGI
+  port: 80
+  replicas: 1
+
+# The application is served at the root of its own TLS hostname. The hostname
+# is environment-specific: see values-dev.yaml and values-prod.yaml. (To serve
+# it under a path on the shared apps host instead, see ingress.path in the
+# chart and apps-host/README.md in the configs repository.)
+#
+# Non-secret environment variables for the container can be set in
+# deployment.environment (chart >= 0.5.6).
+#
+# TLS is enabled by the chart by default, using the certificate Secret
+# tls-<name> (override with ingress.tlsSecretName per environment).
+#
+# The chart ships no ingress annotations: the certificate issuer, DNS and
+# proxy-tuning annotations depend on the target cluster, so set
+# ingress.annotations in each values-<environment>.yaml.

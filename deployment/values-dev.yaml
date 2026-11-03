@@ -1,0 +1,33 @@
+# Dev environment Helm overrides.
+# Merged on top of values.yaml when deploying to dev.
+#
+# LEGACY: read only by the legacy deploy.yml workflow, for applications not
+# yet migrated to Argo CD. Applications deployed by Argo CD keep their values
+# in the dss-applications-argocd-configs repository (<app>/values/, starting
+# from climate-pulse/values/); for them, editing this file deploys nothing.
+deployment:
+  tag: latest
+  replicas: 1
+ingress:
+  # Per-app hostname; the app is served at its root. On the dev cluster the
+  # pattern <app>.dss-app-cci2.compute.cci2.ecmwf.int works for any app:
+  # external-dns creates the DNS record and cert-manager issues the TLS
+  # certificate.
+  hostname: YOUR_APP_NAME.dss-app-cci2.compute.cci2.ecmwf.int
+  # Cluster-specific annotations for the dss-app-cci2 dev cluster: its
+  # certificate issuer is letsencrypt-production, external-dns creates the DNS
+  # record, and its NGINX Inc ingress controller uses nginx.org annotations.
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-production
+    ingress.kubernetes.io/ssl-redirect: "true"
+    external-dns.alpha.kubernetes.io/ttl: "300"
+    nginx.org/proxy-buffer-size: 128K
+    nginx.org/proxy-buffers: 4 256K
+    nginx.org/proxy-busy-buffers-size: 256K
+    # Under Argo CD, every dev Ingress in dss-web-apps is behind HTTP basic
+    # auth, using the htpasswd Secret shared by all dss-web-apps on the dev
+    # cluster (applied once per cluster by an administrator; see
+    # argocd-project-setup/ in the configs repository). The Secret does not
+    # exist in the legacy namespaces, so these stay commented out here:
+    # nginx.org/basic-auth-secret: dss-web-apps-htpasswd
+    # nginx.org/basic-auth-realm: "dss-web-apps (dev)"

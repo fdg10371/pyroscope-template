@@ -1,0 +1,137 @@
+name: Deploy Single Pod Application Chart
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_environment:
+        required: true
+        description: 'Deployment environment (dev or prod)'
+        type: choice
+        options:
+          - dev
+          - prod
+        default: dev
+      options_directory:
+        description: |
+          Path to options directory, relative to repo root.
+        required: false
+        default: .github/
+        type: string
+      clear_existing_pods:
+        description: 'Delete existing pods for this release after a successful deploy'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'  
+
+jobs:
+  deploy:
+    name: Helm Deploy
+    runs-on:
+      - self-hosted
+    permissions:
+      contents: read
+    env:
+      OPTIONS_FILE_BASE: ${{ github.event.inputs.options_directory }}/options.env
+      OPTIONS_FILE_ENV: ${{ github.event.inputs.options_directory }}/options-${{ github.event.inputs.deployment_environment }}.env
+      CLEAR_EXISTING_PODS: ${{ github.event.inputs.clear_existing_pods || 'false' }}
+      # Optional: additional Helm values injected at deploy time (e.g. secrets).
+      # Store the YAML content in a GitHub Actions secret named SECRET_VALUES_YAML.
+      VALUES_YAML: ${{ secrets.SECRET_VALUES_YAML != '' && secrets.SECRET_VALUES_YAML || '' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Load deploy options
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RELEASE_NAME=${{ github.event.repository.name }}
+          NAMESPACE=cads-apps-${{ github.event.inputs.deployment_environment }}
+          HELM_CHART=oci://eccr.ecmwf.int/c3s-applications/single-pod-application
+          HELM_CHART_VERSION=0.5.3
+          KUBECONFIG=/home/cds/.kubeconfig
+          VALUES_FILE=deployment/values.yaml,deployment/values-${{ github.event.inputs.deployment_environment }}.yaml
+          HELM_EXTRA_ARGS=""
+
+  
+          for FILE in "$OPTIONS_FILE_BASE" "$OPTIONS_FILE_ENV"; do
+            if [[ -f "$FILE" ]]; then
+              # shellcheck disable=SC1090
+              source "$FILE"
+            else
+              echo "Options file not found: $FILE — using defaults." >&2
+            fi
+          done
+          
+          {
+            echo "RELEASE_NAME=$RELEASE_NAME"
+            echo "NAMESPACE=$NAMESPACE"
+            echo "HELM_CHART=$HELM_CHART"
+            echo "HELM_CHART_VERSION=$HELM_CHART_VERSION"
+            echo "KUBECONFIG=$KUBECONFIG"
+            echo "VALUES_FILE=$VALUES_FILE"
+            echo "HELM_EXTRA_ARGS=$HELM_EXTRA_ARGS"
+          } >> "$GITHUB_ENV"
+
+      - name: Deploy Helm chart
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Helm merges values files from left to right.
+          # Precedence is: values_file < values_yaml.
+          VALUES_ARGS=()
+          VALUE_FILE_INDEX=1
+          OVERRIDE_VALUES_FILE="/tmp/values-02-override.yaml"
+
+          if [[ -n "${VALUES_FILE:-}" ]]; then
+            IFS=',' read -r -a VALUE_FILES <<< "$VALUES_FILE"
+            for VALUE_FILE in "${VALUE_FILES[@]}"; do
+              VALUE_FILE="$(echo "$VALUE_FILE" | xargs)"
+              if [[ -z "$VALUE_FILE" ]]; then
+                continue
+              fi
+              if [[ ! -f "$VALUE_FILE" ]]; then
+                echo "values_file not found: $VALUE_FILE — skipping." >&2
+                continue
+              fi
+              COPIED_VALUE_FILE="/tmp/values-$(printf "%02d" "$VALUE_FILE_INDEX")-base.yaml"
+              cp "$VALUE_FILE" "$COPIED_VALUE_FILE"
+              VALUES_ARGS+=("-f" "$COPIED_VALUE_FILE")
+              VALUE_FILE_INDEX=$((VALUE_FILE_INDEX + 1))
+            done
+          fi
+
+          if [[ -n "$VALUES_YAML" ]]; then
+            printf "%s\n" "$VALUES_YAML" > "$OVERRIDE_VALUES_FILE"
+            VALUES_ARGS+=("-f" "$OVERRIDE_VALUES_FILE")
+          fi
+
+          HELM_CMD=(upgrade --install "$RELEASE_NAME" "$HELM_CHART" --version "$HELM_CHART_VERSION" --namespace "$NAMESPACE")
+
+          if [[ -n "${HELM_EXTRA_ARGS:-}" ]]; then
+            read -r -a EXTRA_ARGS <<< "$HELM_EXTRA_ARGS"
+            HELM_CMD+=("${EXTRA_ARGS[@]}")
+          fi
+
+          HELM_CMD+=("${VALUES_ARGS[@]}")
+
+          printf 'Running: helm %q ' "${HELM_CMD[@]}"
+          printf '\n'
+          helm "${HELM_CMD[@]}"
+
+      - name: Clear existing pods for release
+        if: ${{ env.CLEAR_EXISTING_PODS == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Deleting pods for release '$RELEASE_NAME' in namespace '$NAMESPACE'"
+          kubectl delete pods -n "$NAMESPACE" -l "app.kubernetes.io/instance=$RELEASE_NAME"

@@ -1,0 +1,32 @@
+# Prod environment Helm overrides.
+# Merged on top of values.yaml when deploying to prod.
+#
+# LEGACY: read only by the legacy deploy.yml workflow, for applications not
+# yet migrated to Argo CD. Applications deployed by Argo CD keep their values
+# in the dss-applications-argocd-configs repository (<app>/values/, starting
+# from climate-pulse/values/); for them, editing this file deploys nothing.
+# Update 'tag' to the release version before deploying to production.
+deployment:
+  tag: X.Y.Z
+  replicas: 2
+ingress:
+  # Per-app production hostname (agreed with the infrastructure team);
+  # the app is served at its root.
+  hostname: YOUR_APP_HOSTNAME
+  # Cluster-specific annotations: set the certificate issuer and the ingress
+  # controller's annotations for the production cluster. The dss-app-cci1
+  # cluster runs external-dns and the NGINX Inc controller (nginx.org
+  # annotations), like dev: for a <app>.dss-app-cci1.compute.cci1.ecmwf.int
+  # hostname, use the dev annotations (without basic auth) with
+  # cert-manager.io/cluster-issuer: letsencrypt-production. A public hostname
+  # outside the cci?.ecmwf.int zones needs the HTTP-01 issuer
+  # letsencrypt-production-issuer instead (see climate-pulse in the configs
+  # repository). Example for a cluster running the community ingress-nginx
+  # controller:
+  # annotations:
+  #   cert-manager.io/cluster-issuer: certificate-issuer-letsencrypt
+  #   cert-manager.io/http01-edit-in-place: "true"
+  #   cert-manager.io/issue-temporary-certificate: "true"
+  #   nginx.ingress.kubernetes.io/proxy-buffering: "on"
+  #   nginx.ingress.kubernetes.io/proxy-buffer-size: 128K
+  #   nginx.ingress.kubernetes.io/proxy-buffers-number: "4"
